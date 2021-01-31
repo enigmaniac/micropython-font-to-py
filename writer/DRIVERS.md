@@ -63,10 +63,16 @@ tested with `writer.py` and `nanogui.py`.
  * The [Nokia 5110](https://github.com/mcauser/micropython-pcd8544/blob/master/pcd8544_fb.py)
  * The [SSD1331 colour OLED](https://github.com/peterhinch/micropython-nano-gui/blob/master/drivers/ssd1331/ssd1331.py)
  * The [HX1230 96x68 LCD](https://github.com/mcauser/micropython-hx1230/blob/master/hx1230_fb.py)
- * The [RA8875 driver for larger TFT displays](https://github.com/peterhinch/micropython_ra8875.git)
 
 The latter example illustrates a very simple driver which provides full access
 to `writer.py` and `nanogui.py` libraries.
+
+Because `nanogui` uses the Writer classes, all `nanogui` drivers support code
+using `Writer` or `CWriter`. They are lightweight and provide a minimum
+functionality necessary to support these classes.
+[This is the current list](https://github.com/peterhinch/micropython-nano-gui#12-description).
+This list is more current as `nanogui` is being expanded to support a wider
+range of displays.
 
 # Drivers using the display buffer
 

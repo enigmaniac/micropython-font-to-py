@@ -6,11 +6,12 @@
 
 # Some code adapted from Daniel Bader's work at the following URL
 # http://dbader.org/blog/monochrome-font-rendering-with-freetype-and-python
-# With thanks to Stephen Irons @ironss for various improvements.
+# With thanks to Stephen Irons @ironss for various improvements, also to
+# @enigmaniac for ideas around handling `bdf` and `pcf` files.
 
 # The MIT License (MIT)
 #
-# Copyright (c) 2016-2019 Peter Hinch
+# Copyright (c) 2016-2021 Peter Hinch
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +47,7 @@ MAXCHAR = 126  # 94 chars
 
 # Lines are broken with \ for readability.
 
-class ByteWriter(object):
+class ByteWriter:
     bytes_per_line = 16
 
     def __init__(self, stream, varname):
@@ -92,7 +93,7 @@ def var_write(stream, name, value):
 # FONT HANDLING
 
 
-class Bitmap(object):
+class Bitmap:
     """
     A 2D bitmap image represented as a list of byte values. Each byte indicates
     the state of a single pixel in the bitmap. A value of 0 indicates that the
@@ -166,7 +167,7 @@ class Bitmap(object):
                 row += 1
 
 
-class Glyph(object):
+class Glyph:
     def __init__(self, pixels, width, height, top, left, advance_width):
         self.bitmap = Bitmap(width, height, pixels)
 
@@ -260,7 +261,7 @@ class Glyph(object):
 # height (in pixels) of all characters
 # width (in pixels) for monospaced output (advance width of widest char)
 class Font(dict):
-    def __init__(self, filename, size, minchar, maxchar, monospaced, defchar, charset):
+    def __init__(self, filename, size, minchar, maxchar, monospaced, defchar, charset, bitmapped):
         super().__init__()
         self._face = freetype.Face(filename)
         # .crange is the inclusive range of ordinal values spanning the character set.
@@ -283,9 +284,34 @@ class Font(dict):
             self.charset = [chr(defchar)] + cs
         # Populate self with defined chars only
         self.update(dict.fromkeys([c for c in self.charset if c]))
-        self.max_width = self.get_dimensions(size)
+        self.max_width = self.bmp_dimensions(size) if bitmapped else self.get_dimensions(size)
         self.width = self.max_width if monospaced else 0
         self._assign_values()  # Assign values to existing keys
+
+    def bmp_dimensions(self, height):
+        #self._face.set_pixel_sizes(0, height)  # TODO fails with PCF file: invalid pixel size
+        max_descent = 0
+        # For each character in the charset string we get the glyph
+        # and update the overall dimensions of the resulting bitmap.
+        max_width = 0
+        max_ascent = 0
+        for char in self.keys():
+            glyph = self._glyph_for_character(char)
+            max_ascent = max(max_ascent, glyph.ascent)
+            max_descent = max(max_descent, glyph.descent)
+            # for a few chars e.g. _ glyph.width > glyph.advance_width
+            max_width = int(max(max_width, glyph.advance_width,
+                                    glyph.width))
+
+        self.height = int(max_ascent + max_descent)
+        self._max_ascent = int(max_ascent)
+        self._max_descent = int(max_descent)
+        print('Requested height', height)
+        print('Actual height', self.height)
+        print('Max width', max_width)
+        print('Max descent', self._max_descent)
+        print('Max ascent', self._max_ascent)
+        return max_width
 
     # n-pass solution to setting a precise height.
     def get_dimensions(self, required_height):
@@ -468,9 +494,10 @@ def glyphs():
 def write_func(stream, name, arg):
     stream.write('def {}():\n    return {}\n\n'.format(name, arg))
 
-def write_font(op_path, font_path, height, monospaced, hmap, reverse, minchar, maxchar, defchar, charset, iterate):
+def write_font(op_path, font_path, height, monospaced, hmap, reverse, minchar,
+               maxchar, defchar, charset, iterate, bitmapped):
     try:
-        fnt = Font(font_path, height, minchar, maxchar, monospaced, defchar, charset)
+        fnt = Font(font_path, height, minchar, maxchar, monospaced, defchar, charset, bitmapped)
     except freetype.ft_errors.FT_Exception:
         print("Can't open", font_path)
         return False
@@ -549,8 +576,8 @@ def quit(msg):
     print(msg)
     sys.exit(1)
 
-DESC = """font_to_py.py
-Utility to convert ttf or otf font files to Python source.
+DESC = """font_to_py.py V0.4.0
+Utility to convert ttf, otf, bdf and pcf font files to Python source.
 Sample usage:
 font_to_py.py FreeSans.ttf 23 freesans.py
 
@@ -618,7 +645,7 @@ if __name__ == "__main__":
     if not os.path.isfile(args.infile):
         quit("Font filename does not exist")
 
-    if not os.path.splitext(args.infile)[1].upper() in ('.TTF', '.OTF'):
+    if not os.path.splitext(args.infile)[1].upper() in ('.TTF', '.OTF', '.BDF', '.PCF'):
         quit("Font file should be a ttf or otf file.")
 
     if args.binary:
@@ -663,10 +690,18 @@ if __name__ == "__main__":
         cs = {c for c in cset if c.isprintable() or (0xE000 <= ord(c) <= 0xF8FF) } - {args.errchar}
         cs = sorted(list(cs))
         cset = ''.join(cs)  # Back to string
+        bitmapped = os.path.splitext(args.infile)[1].upper() in ('.BDF', '.PCF')
+        if bitmapped:
+            if args.height != 0:
+                print('Warning: height arg ignored for bitmapped fonts.')
+            chkface = freetype.Face(args.infile)
+            args.height = chkface._get_available_sizes()[0].height
+            print("Found font with size " + str(args.height))
+
         print('Writing Python font file.')
         if not write_font(args.outfile, args.infile, args.height, args.fixed,
                           args.xmap, args.reverse, args.smallest, args.largest,
-                          args.errchar, cset, args.iterate):
+                          args.errchar, cset, args.iterate, bitmapped):
             sys.exit(1)
 
     print(args.outfile, 'written successfully.')
